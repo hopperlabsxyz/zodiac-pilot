@@ -1,32 +1,17 @@
-import { getReadOnlyProvider } from '@/providers'
 import type { HexAddress } from '@/types'
 import { KnownContracts } from '@gnosis.pm/zodiac'
-import { Contract, FunctionFragment, Interface } from 'ethers'
+import { FunctionFragment, Result } from 'ethers'
 import { UnfoldVertical } from 'lucide-react'
 import type { TransactionTranslation } from '../types'
 import { unwrapMulticall } from '../utils'
-
-const morphoErc4626Interface = new Interface([
-  'function erc4626Deposit(address, uint256, uint256, address) external payable',
-  'function erc4626Mint(address, uint256, uint256, address) external payable',
-  'function erc4626Redeem(address, uint256, uint256, address, address) external payable',
-  'function erc4626Withdraw(address, uint256, uint256, address, address) external payable',
-  'function morphoSupplyCollateral((address,address,address,address,uint256) marketParams,uint256 assets,address onBehalf,bytes data) external payable',
-])
-
-const erc4626Interface = new Interface([
-  'function deposit(uint256, address) external payable',
-  'function mint(uint256, address) external payable',
-  'function redeem(uint256, address, address) external payable',
-  'function withdraw(uint256, address, address) external payable',
-  'function approve(address, uint256) external',
-  'function asset() external view returns (address)',
-  'function convertToAssets(uint256) external view returns (uint256)',
-])
-
-const morphoInterface = new Interface([
-  'function supplyCollateral((address,address,address,address,uint256) marketParams, uint256 assets, address onBehalf, bytes calldata data)',
-])
+import {
+  erc4626Interface,
+  morphoBundlerInterface,
+  morphoInterface,
+  publicAllocatorInterface,
+} from './interfaces'
+import type { BundlerCallHandler } from './type'
+import { createContract } from './utils'
 
 const CHAIN_AGNOSTIC_BUNDLER_V2 = '0x23055618898e202386e6c13955a58D3C68200BFB'
 const ETHEREUM_BUNDLER_V2 = '0x4095F064B8d3c3548A3bebfd0Bbfd04750E30077'
@@ -67,184 +52,219 @@ export const morphoMulticall = {
       return undefined
     }
 
-    const provider = getReadOnlyProvider(chainId)
+    const unwrappedCalls = unwrapMulticall(data)
 
-    const functionCalls = unwrapMulticall(data)
-    console.log('calls', functionCalls)
-
-    const functionCallsConverted: {
+    const functionCalls: {
       to: HexAddress
       data: HexAddress
       value: bigint
     }[] = []
 
-    console.log(morphoErc4626Interface.fragments)
-    await Promise.all(
-      functionCalls.map(async (call: HexAddress) => {
-        for (const fragment of morphoErc4626Interface.fragments) {
-          if (fragment.type !== 'function') continue
-          try {
-            console.log('HEEEEEEERE 1')
-            // reverts if the call is not part of morphoErc4626Interface
-            const params = morphoErc4626Interface.decodeFunctionData(
-              fragment as FunctionFragment,
-              call,
-            )
-            console.log('HEEEEEEERE 2')
-
-            // Map decoded parameters to ERC-4626 call format
-            switch ((fragment as FunctionFragment).name) {
-              case 'erc4626Deposit': {
-                const metaMorpho = new Contract(
-                  params[0],
-                  erc4626Interface,
-                  provider,
-                )
-                console.log('HEEEEEEERE')
-                const underlyingAddress = await metaMorpho.asset()
-
-                // Add the `approve` call for the underlying token
-                functionCallsConverted.push({
-                  to: underlyingAddress,
-                  data: erc4626Interface.encodeFunctionData('approve', [
-                    params[0], // vault address
-                    params[1], // amount
-                  ]) as HexAddress,
-                  value: 0n,
-                })
-
-                const newData = erc4626Interface.encodeFunctionData('deposit', [
-                  params[1], // assets
-                  params[3], // receiver
-                ]) as HexAddress
-
-                // Push the translated ERC-4626 call
-                functionCallsConverted.push({
-                  to: params[0], // vault address
-                  data: newData,
-                  value: 0n,
-                })
-                break
-              }
-              case 'erc4626Mint': {
-                const metaMorpho = new Contract(
-                  params[0],
-                  erc4626Interface,
-                  provider,
-                )
-                const underlyingAddress = await metaMorpho.asset()
-                const amount = await metaMorpho.convertToAssets(params[1]) // `params[1]` shares
-                const amountWithMargin =
-                  amount + BigInt(Math.round(Number(amount) / 500)) // amount + amount * 0.2%
-
-                let newData = erc4626Interface.encodeFunctionData('approve', [
-                  params[0], // vault address
-                  amountWithMargin,
-                ]) as HexAddress
-                // Add the `approve` call for the underlying token
-                functionCallsConverted.push({
-                  to: underlyingAddress,
-                  data: newData,
-                  value: 0n,
-                })
-
-                newData = erc4626Interface.encodeFunctionData('mint', [
-                  params[1], // shares
-                  params[3], // receiver
-                ]) as HexAddress
-                // Push the translated ERC-4626 call
-                functionCallsConverted.push({
-                  to: params[0], // vault address
-                  data: newData,
-                  value: 0n,
-                })
-                break
-              }
-              case 'erc4626Redeem': {
-                const newData = erc4626Interface.encodeFunctionData('redeem', [
-                  params[1], // shares
-                  params[3], // receiver
-                  params[4], // owner
-                ]) as HexAddress
-                // Push the translated ERC-4626 call
-                functionCallsConverted.push({
-                  to: params[0], // vault address
-                  data: newData,
-                  value: 0n,
-                })
-                break
-              }
-              case 'erc4626Withdraw':
-                {
-                  const newData = erc4626Interface.encodeFunctionData(
-                    'withdraw',
-                    [
-                      params[1], // assets
-                      params[3], // receiver
-                      params[4], // owner
-                    ],
-                  ) as HexAddress
-                  // Push the translated ERC-4626 call
-                  functionCallsConverted.push({
-                    to: params[0], // vault address
-                    data: newData,
-                    value: 0n,
-                  })
-                }
-                break
-              case 'morphoSupplyCollateral': {
-                console.log('dont forget to approve')
-                let newData = erc4626Interface.encodeFunctionData('approve', [
-                  MORPHO,
-                  params[1], // assets
-                ]) as HexAddress
-                functionCallsConverted.push({
-                  to: params[0][1], // collateralToken
-                  data: newData,
-                  value: 0n,
-                })
-                console.log('params', params)
-                console.log(params[0][0])
-                newData = morphoInterface.encodeFunctionData(
-                  'supplyCollateral',
-                  [
-                    [
-                      params[0][0], // loanToken
-                      params[0][1], // collateralToken
-                      params[0][2], // oracle
-                      params[0][3], // irm
-                      params[0][4], // ltv
-                    ], // marketParams (tuple)
-                    params[1], // assets
-                    avatarAddress, // onBehalf
-                    '0x', // data (empty bytes)
-                  ],
-                ) as HexAddress
-                functionCallsConverted.push({
-                  to: MORPHO, // vault address
-                  data: newData,
-                  value: 0n,
-                })
-                break
-              }
-              default:
-                continue
-            }
-          } catch (error) {
-            console.log(error)
-            continue
-          }
+    for (const c of unwrappedCalls) {
+      for (const fragment of morphoBundlerInterface.fragments) {
+        if (fragment.type !== 'function') continue
+        try {
+          // reverts if the call is not part of morphoBundlerInterface
+          const params = morphoBundlerInterface.decodeFunctionData(
+            fragment as FunctionFragment,
+            c,
+          )
+          const fragmentName = (fragment as FunctionFragment).name
+          functionCalls.push(
+            ...(await convertCallToMorphoBundler[fragmentName]({
+              transaction,
+              chainId,
+              avatarAddress,
+              params,
+            })),
+          )
+        } catch {
+          continue
         }
-      }),
-    )
+      }
+    }
 
-    console.log(functionCallsConverted)
-    if (functionCallsConverted.length === 0) {
+    if (functionCalls.length === 0) {
       return undefined
     }
 
-    console.log('converted', functionCallsConverted)
-
-    return functionCallsConverted
+    return functionCalls
   },
 } satisfies TransactionTranslation
+
+const convertCallToMorphoBundler: Record<string, BundlerCallHandler> = {
+  erc4626Mint: async ({ chainId, params }) => {
+    const metaMorpho = createContract(params[0], erc4626Interface, chainId)
+    const underlyingAddress = await metaMorpho.asset()
+    const amount = await metaMorpho.convertToAssets(params[1]) // `params[1]` shares
+    const amountWithMargin = amount + BigInt(Math.round(Number(amount) / 500)) // amount + amount * 0.2%
+
+    const approveCall = erc4626Interface.encodeFunctionData('approve', [
+      params[0], // vault address
+      amountWithMargin,
+    ]) as HexAddress
+
+    const mintCall = erc4626Interface.encodeFunctionData('mint', [
+      params[1], // shares
+      params[3], // receiver
+    ]) as HexAddress
+
+    return [
+      {
+        to: underlyingAddress,
+        data: approveCall,
+        value: 0n,
+      },
+      {
+        to: params[0], // vault address
+        data: mintCall,
+        value: 0n,
+      },
+    ]
+  },
+  erc4626Deposit: async ({ chainId, params }) => {
+    const metaMorpho = createContract(params[0], erc4626Interface, chainId)
+    const underlyingAddress = await metaMorpho.asset()
+
+    const approveCall = erc4626Interface.encodeFunctionData('approve', [
+      params[0], // vault address
+      params[1], // amount
+    ]) as HexAddress
+
+    const depositCall = erc4626Interface.encodeFunctionData('deposit', [
+      params[1], // assets
+      params[3], // receiver
+    ]) as HexAddress
+
+    return [
+      {
+        to: underlyingAddress,
+        data: approveCall,
+        value: 0n,
+      },
+      {
+        to: params[0], // vault address
+        data: depositCall,
+        value: 0n,
+      },
+    ]
+  },
+  erc4626Redeem: async ({ params }) => {
+    const redeemCall = erc4626Interface.encodeFunctionData('redeem', [
+      params[1], // shares
+      params[3], // receiver
+      params[4], // owner
+    ]) as HexAddress
+    return [
+      {
+        to: params[0], // vault address
+        data: redeemCall,
+        value: 0n,
+      },
+    ]
+  },
+  erc4626Withdraw: async ({ params }) => {
+    const newData = erc4626Interface.encodeFunctionData('withdraw', [
+      params[1], // assets
+      params[3], // receiver
+      params[4], // owner
+    ]) as HexAddress
+    return [
+      {
+        to: params[0], // vault address
+        data: newData,
+        value: 0n,
+      },
+    ]
+  },
+  morphoSupplyCollateral: async ({ avatarAddress, params }) => {
+    const approveCall = erc4626Interface.encodeFunctionData('approve', [
+      MORPHO,
+      params[1], // assets
+    ]) as HexAddress
+    const supplyCollateralCall = morphoInterface.encodeFunctionData(
+      'supplyCollateral',
+      [
+        [
+          params[0][0], // loanToken
+          params[0][1], // collateralToken
+          params[0][2], // oracle
+          params[0][3], // irm
+          params[0][4], // ltv
+        ], // marketParams (tuple)
+        params[1], // assets
+        avatarAddress, // onBehalf
+        '0x', // data (empty bytes)
+      ],
+    ) as HexAddress
+    return [
+      {
+        to: params[0][1], // collateralToken
+        data: approveCall,
+        value: 0n,
+      },
+      {
+        to: MORPHO,
+        data: supplyCollateralCall,
+        value: 0n,
+      },
+    ]
+  },
+  reallocateTo: async ({ params }) => {
+    const withdrawals = params[3].map((w: Result) => {
+      return [
+        [
+          w[0][0], // loanToken
+          w[0][1], // collateralToken
+          w[0][2], // oracle
+          w[0][3], // irm
+          w[0][4], // ltv
+        ], // marketParams
+        w[1], // amount
+      ]
+    })
+    const reallocateToCall = publicAllocatorInterface.encodeFunctionData(
+      'reallocateTo',
+      [
+        params[1], // vault
+        withdrawals,
+        [
+          params[4][0], // loanToken
+          params[4][1], // collateralToken
+          params[4][2], // oracle
+          params[4][3], // irm
+          params[4][4], // ltv
+        ], // supplyMarketParams
+      ],
+    ) as HexAddress
+    return [
+      {
+        to: params[0], // publicAllocator
+        data: reallocateToCall,
+        value: 0n,
+      },
+    ]
+  },
+  morphoBorrow: async ({ params, avatarAddress }) => {
+    const borrowCall = morphoInterface.encodeFunctionData('borrow', [
+      [
+        params[0][0], // loanToken
+        params[0][1], // collateralToken
+        params[0][2], // oracle
+        params[0][3], // irm
+        params[0][4], // ltv
+      ], // marketParams
+      params[1], // assets
+      params[2], // shares
+      avatarAddress, // onBehalf
+      avatarAddress, // receiver
+    ]) as HexAddress
+    return [
+      {
+        to: MORPHO,
+        data: borrowCall,
+        value: 0n,
+      },
+    ]
+  },
+}
