@@ -97,11 +97,13 @@
   "dependencies": {
     "@epic-web/invariant": "^1.0.0",
     "@headlessui/react": "^2.2.0",
+    "@morpho-org/blue-sdk": "^2.1.2",
+    "@morpho-org/blue-sdk-ethers": "^2.0.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.469.0",
-    "react-toastify": "11.0.2",
     "react-router": "7.1.1",
     "react-stick": "^5.0.6",
+    "react-toastify": "11.0.2",
     "zod": "^3.23.8"
   }
 }

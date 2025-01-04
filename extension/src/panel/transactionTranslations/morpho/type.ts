@@ -12,3 +12,5 @@ export interface CallHandlerParam {
 export type BundlerCallHandler = (
   param: CallHandlerParam,
 ) => Promise<MetaTransactionRequest[]>
+
+export type BigIntish = bigint | string | number | boolean

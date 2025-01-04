@@ -1,5 +1,9 @@
 import type { HexAddress } from '@/types'
+import { MarketParams } from '@morpho-org/blue-sdk'
+
+import { getReadOnlyProvider } from '@/providers'
 import { KnownContracts } from '@gnosis.pm/zodiac'
+import { fetchMarketFromConfig } from '@morpho-org/blue-sdk-ethers'
 import { FunctionFragment, Result } from 'ethers'
 import { UnfoldVertical } from 'lucide-react'
 import type { TransactionTranslation } from '../types'
@@ -71,7 +75,7 @@ export const morphoMulticall = {
           )
           const fragmentName = (fragment as FunctionFragment).name
           functionCalls.push(
-            ...(await convertCallToMorphoBundler[fragmentName]({
+            ...(await convertMorphoBundlerCall[fragmentName]({
               transaction,
               chainId,
               avatarAddress,
@@ -92,7 +96,7 @@ export const morphoMulticall = {
   },
 } satisfies TransactionTranslation
 
-const convertCallToMorphoBundler: Record<string, BundlerCallHandler> = {
+const convertMorphoBundlerCall: Record<string, BundlerCallHandler> = {
   erc4626Mint: async ({ chainId, params }) => {
     const metaMorpho = createContract(params[0], erc4626Interface, chainId)
     const underlyingAddress = await metaMorpho.asset()
@@ -263,6 +267,56 @@ const convertCallToMorphoBundler: Record<string, BundlerCallHandler> = {
       {
         to: MORPHO,
         data: borrowCall,
+        value: 0n,
+      },
+    ]
+  },
+  morphoRepay: async ({ params, avatarAddress, chainId }) => {
+    console.log('here')
+    const provider = getReadOnlyProvider(chainId)
+    const marketParams = new MarketParams({
+      loanToken: params[0][0], // loanToken
+      collateralToken: params[0][1], // collateralToken
+      oracle: params[0][2], // oracle
+      irm: params[0][3], // irm
+      lltv: params[0][4], // ltv
+    })
+    const market = await fetchMarketFromConfig(marketParams, { provider })
+    console.log('success')
+
+    console.log('assets', params[1])
+    console.log('shares', params[2])
+    console.log('convertedShares', market.toSupplyAssets(params[2]))
+    const amount =
+      params[1] === 0n ? market.toSupplyAssets(params[2]) : BigInt(params[1])
+    const amountWithMargin = amount + BigInt(Math.round(Number(amount) / 500)) // amount + amount * 0.2%
+    console.log('amount', amount)
+    const approveCall = erc4626Interface.encodeFunctionData('approve', [
+      MORPHO,
+      params[1] === 0n ? amountWithMargin : amount, // assets
+    ]) as HexAddress
+    const repayCall = morphoInterface.encodeFunctionData('repay', [
+      [
+        params[0][0], // loanToken
+        params[0][1], // collateralToken
+        params[0][2], // oracle
+        params[0][3], // irm
+        params[0][4], // ltv
+      ], // marketParams
+      params[1], // assets
+      params[2], // shares
+      avatarAddress, // onBehalf
+      '0x', // data (empty bytes)
+    ]) as HexAddress
+    return [
+      {
+        to: params[0][0], // loanToken
+        data: approveCall,
+        value: 0n,
+      },
+      {
+        to: MORPHO,
+        data: repayCall,
         value: 0n,
       },
     ]

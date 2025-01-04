@@ -8,6 +8,7 @@ export const morphoBundlerInterface = new Interface([
   'function morphoSupplyCollateral((address,address,address,address,uint256) marketParams,uint256 assets,address onBehalf,bytes data) external payable',
   'function reallocateTo(address publicAllocator, address vault, uint256 value, ((address,address,address,address,uint256), uint128)[] withdrawals,(address,address,address,address,uint256) supplyMarketParams) external payable',
   'function morphoBorrow((address,address,address,address,uint256) marketParams, uint256 assets, uint256 shares, uint256 slippageAmount, address receiver) external payable',
+  'function morphoRepay((address,address,address,address,uint256) marketParams, uint256 assets, uint256 shares, uint256 slippageAmount, address onBehalf, bytes data) external payable',
 ])
 
 export const publicAllocatorInterface = new Interface([
@@ -25,6 +26,7 @@ export const erc4626Interface = new Interface([
 ])
 
 export const morphoInterface = new Interface([
-  'function supplyCollateral((address,address,address,address,uint256) marketParams, uint256 assets, address onBehalf, bytes calldata data)',
+  'function supplyCollateral((address,address,address,address,uint256) marketParams, uint256 assets, address onBehalf, bytes data)',
   'function borrow((address,address,address,address,uint256) marketParams, uint256 assets, uint256 shares, address onBehalf, address receiver) external returns (uint256, uint256)',
+  'function repay((address,address,address,address,uint256) marketParams, uint256 assets, uint256 shares, address onBehalf, bytes data) external returns (uint256, uint256)',
 ])
