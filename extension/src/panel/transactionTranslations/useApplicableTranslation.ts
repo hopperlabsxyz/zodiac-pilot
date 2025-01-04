@@ -122,7 +122,6 @@ const findApplicableTranslation = async (
           icon: translation.icon,
           result,
         }
-        break
       }
     }
   }

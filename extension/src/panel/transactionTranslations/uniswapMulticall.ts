@@ -1,14 +1,7 @@
-import type { HexAddress } from '@/types'
 import { KnownContracts } from '@gnosis.pm/zodiac'
-import { FunctionFragment, Interface } from 'ethers'
 import { UnfoldVertical } from 'lucide-react'
 import type { TransactionTranslation } from './types'
-
-const uniswapMulticallInterface = new Interface([
-  'function multicall(bytes[] calldata data) external returns (bytes[] memory results)',
-  'function multicall(uint256 deadline, bytes[] calldata data) external returns (bytes[] memory results)',
-  'function multicall(bytes32 previousBlockhash, bytes[] calldata data) external returns (bytes[] memory results)',
-])
+import { unwrapMulticall } from './utils'
 
 export const uniswapMulticall = {
   title: 'Unfold individual calls',
@@ -27,19 +20,7 @@ export const uniswapMulticall = {
       return undefined
     }
 
-    let functionCalls: HexAddress[] = []
-    for (const fragment of uniswapMulticallInterface.fragments) {
-      if (fragment.type !== 'function') continue
-      try {
-        functionCalls = uniswapMulticallInterface.decodeFunctionData(
-          fragment as FunctionFragment,
-          data,
-        ).data as HexAddress[]
-        break
-      } catch {
-        continue
-      }
-    }
+    const functionCalls = unwrapMulticall(data)
 
     if (functionCalls.length === 0) {
       return undefined
