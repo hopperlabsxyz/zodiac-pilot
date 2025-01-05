@@ -11,3 +11,7 @@ export function createContract(
   const provider = getReadOnlyProvider(chainId)
   return new Contract(address, iface, provider)
 }
+
+export function addOnePercent(bigIntValue: bigint) {
+  return bigIntValue + bigIntValue / 100n
+}

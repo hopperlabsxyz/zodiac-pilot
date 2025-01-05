@@ -15,7 +15,7 @@ import {
   publicAllocatorInterface,
 } from './interfaces'
 import type { BundlerCallHandler } from './type'
-import { createContract } from './utils'
+import { addOnePercent, createContract } from './utils'
 
 const CHAIN_AGNOSTIC_BUNDLER_V2 = '0x23055618898e202386e6c13955a58D3C68200BFB'
 const ETHEREUM_BUNDLER_V2 = '0x4095F064B8d3c3548A3bebfd0Bbfd04750E30077'
@@ -100,12 +100,11 @@ const convertMorphoBundlerCall: Record<string, BundlerCallHandler> = {
   erc4626Mint: async ({ chainId, params }) => {
     const metaMorpho = createContract(params[0], erc4626Interface, chainId)
     const underlyingAddress = await metaMorpho.asset()
-    const amount = await metaMorpho.convertToAssets(params[1]) // `params[1]` shares
-    const amountWithMargin = amount + BigInt(Math.round(Number(amount) / 500)) // amount + amount * 0.2%
+    const amount = addOnePercent(await metaMorpho.convertToAssets(params[1])) // `params[1]` shares
 
     const approveCall = erc4626Interface.encodeFunctionData('approve', [
       params[0], // vault address
-      amountWithMargin,
+      amount,
     ]) as HexAddress
 
     const mintCall = erc4626Interface.encodeFunctionData('mint', [
@@ -272,7 +271,6 @@ const convertMorphoBundlerCall: Record<string, BundlerCallHandler> = {
     ]
   },
   morphoRepay: async ({ params, avatarAddress, chainId }) => {
-    console.log('here')
     const provider = getReadOnlyProvider(chainId)
     const marketParams = new MarketParams({
       loanToken: params[0][0], // loanToken
@@ -282,18 +280,13 @@ const convertMorphoBundlerCall: Record<string, BundlerCallHandler> = {
       lltv: params[0][4], // ltv
     })
     const market = await fetchMarketFromConfig(marketParams, { provider })
-    console.log('success')
-
-    console.log('assets', params[1])
-    console.log('shares', params[2])
-    console.log('convertedShares', market.toSupplyAssets(params[2]))
     const amount =
-      params[1] === 0n ? market.toSupplyAssets(params[2]) : BigInt(params[1])
-    const amountWithMargin = amount + BigInt(Math.round(Number(amount) / 500)) // amount + amount * 0.2%
-    console.log('amount', amount)
+      params[1] === 0n
+        ? addOnePercent(market.toSupplyAssets(params[2], 'Up'))
+        : params[1]
     const approveCall = erc4626Interface.encodeFunctionData('approve', [
       MORPHO,
-      params[1] === 0n ? amountWithMargin : amount, // assets
+      amount, // assets
     ]) as HexAddress
     const repayCall = morphoInterface.encodeFunctionData('repay', [
       [
